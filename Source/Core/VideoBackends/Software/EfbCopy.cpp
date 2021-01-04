@@ -3,7 +3,7 @@
 // Refer to the license.txt file included.
 
 #include "Common/CommonTypes.h"
-#include "Common/GL/GLInterfaceBase.h"
+//#include "Common/GL/GLInterfaceBase.h"
 #include "Common/Logging/Log.h"
 #include "Core/HW/Memmap.h"
 #include "VideoBackends/Software/EfbCopy.h"
