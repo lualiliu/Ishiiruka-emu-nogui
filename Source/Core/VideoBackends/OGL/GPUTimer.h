@@ -13,26 +13,26 @@
 namespace OGL
 {
 /*
-* This class can be used to measure the time it takes for the GPU to perform a draw call
-* or compute dispatch. To use:
-*
-*   - Create an instance of GPUTimer before issuing the draw call.
-*     (this can be before or after any binding that needs to be done)
-*
-*   - (optionally) call Begin(). This is not needed for a single draw call.
-*
-*   - Issue the draw call or compute dispatch as normal.
-*
-*   - (optionally) call End(). This is not necessary for a single draw call.
-*
-*   - Call GetTime{Seconds,Milliseconds,Nanoseconds} to determine how long the operation
-*     took to execute on the GPU.
-*
-* NOTE: When the timer is read back, this will force a GL flush, so the more often a timer is used,
-* the larger of a performance impact it will have. Only one timer can be active at any time, due to
-* using GL_TIME_ELAPSED. This is not enforced by the class, however.
-*
-*/
+ * This class can be used to measure the time it takes for the GPU to perform a draw call
+ * or compute dispatch. To use:
+ *
+ *   - Create an instance of GPUTimer before issuing the draw call.
+ *     (this can be before or after any binding that needs to be done)
+ *
+ *   - (optionally) call Begin(). This is not needed for a single draw call.
+ *
+ *   - Issue the draw call or compute dispatch as normal.
+ *
+ *   - (optionally) call End(). This is not necessary for a single draw call.
+ *
+ *   - Call GetTime{Seconds,Milliseconds,Nanoseconds} to determine how long the operation
+ *     took to execute on the GPU.
+ *
+ * NOTE: When the timer is read back, this will force a GL flush, so the more often a timer is used,
+ * the larger of a performance impact it will have. Only one timer can be active at any time, due to
+ * using GL_TIME_ELAPSED. This is not enforced by the class, however.
+ *
+ */
 class GPUTimer final
 {
 public:

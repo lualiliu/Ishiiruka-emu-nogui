@@ -4,223 +4,130 @@
 
 #pragma once
 
-#include <condition_variable>
-#include <future>
+#include <atomic>
 #include <memory>
 #include <mutex>
-#include <queue>
-#include <thread>
-#include <tuple>
+#include <string_view>
 #include <unordered_map>
 
-#include "Common/GL/GLInterfaceBase.h"
 #include "Common/GL/GLUtil.h"
-#include "Common/LinearDiskCache.h"
-
-#include "VideoCommon/GeometryShaderGen.h"
-#include "VideoCommon/ObjectUsageProfiler.h"
-#include "VideoCommon/PixelShaderGen.h"
-#include "VideoCommon/UberShaderCommon.h"
-#include "VideoCommon/UberShaderPixel.h"
-#include "VideoCommon/UberShaderVertex.h"
-#include "VideoCommon/VertexShaderGen.h"
-
-
+#include "VideoCommon/AsyncShaderCompiler.h"
 
 namespace OGL
 {
+class OGLShader;
 class GLVertexFormat;
-class SHADERUID
-{
-  size_t hash = {};
-public:
-  VertexShaderUid vuid;
-  PixelShaderUid puid;
-  GeometryShaderUid guid;
-  void CalculateHash()
-  {
-    VertexShaderUid::ShaderUidHasher vshasher;
-    PixelShaderUid::ShaderUidHasher pshasher;
-    GeometryShaderUid::ShaderUidHasher gshasher;
-    hash = vshasher(vuid) ^ pshasher(puid) ^ gshasher(guid);
-  }
-  bool operator <(const SHADERUID& r) const
-  {
-    return std::tie(vuid, puid, guid) < std::tie(r.vuid, r.puid, r.guid);
-  }
-
-  bool operator ==(const SHADERUID& r) const
-  {
-    return std::tie(vuid, puid, guid) == std::tie(r.vuid, r.puid, r.guid);
-  }
-
-  struct ShaderUidHasher
-  {
-    std::size_t operator()(const SHADERUID& k) const
-    {
-      return k.hash;
-    }
-  };
-};
-
-class UBERSHADERUID
-{
-  size_t hash = {};
-public:
-  UberShader::VertexUberShaderUid vuid;
-  UberShader::PixelUberShaderUid puid;
-  GeometryShaderUid guid;
-  void CalculateHash()
-  {
-    UberShader::VertexUberShaderUid::ShaderUidHasher vshasher;
-    UberShader::PixelUberShaderUid::ShaderUidHasher pshasher;
-    GeometryShaderUid::ShaderUidHasher gshasher;
-    hash = vshasher(vuid) ^ pshasher(puid) ^ gshasher(guid);
-  }
-  bool operator <(const UBERSHADERUID& r) const
-  {
-    return std::tie(vuid, puid, guid) < std::tie(r.vuid, r.puid, r.guid);
-  }
-
-  bool operator ==(const UBERSHADERUID& r) const
-  {
-    return std::tie(vuid, puid, guid) == std::tie(r.vuid, r.puid, r.guid);
-  }
-
-  struct ShaderUidHasher
-  {
-    std::size_t operator()(const UBERSHADERUID& k) const
-    {
-      return k.hash;
-    }
-  };
-};
-
+class StreamBuffer;
 
 struct SHADER
 {
-  SHADER() : glprogid(0), initialized(false)
-  {}
   void Destroy()
   {
-    if (glprogid != 0)
+    DestroyShaders();
+    if (glprogid)
     {
       glDeleteProgram(glprogid);
+      glprogid = 0;
     }
-    glprogid = 0;
-    initialized = false;
   }
-  GLuint glprogid = 0; // OpenGL program id
-  bool initialized = false;
+
+  GLuint vsid = 0;
+  GLuint gsid = 0;
+  GLuint psid = 0;
+  GLuint glprogid = 0;
+
   void SetProgramVariables();
-  void Bind();
+  void SetProgramBindings(bool is_compute);
+  void Bind() const;
+  void DestroyShaders();
 };
-void SetProgramBindings(GLuint glprogid, bool is_compute);
+
+struct PipelineProgramKey
+{
+  u64 vertex_shader_id;
+  u64 geometry_shader_id;
+  u64 pixel_shader_id;
+
+  bool operator==(const PipelineProgramKey& rhs) const;
+  bool operator!=(const PipelineProgramKey& rhs) const;
+  bool operator<(const PipelineProgramKey& rhs) const;
+};
+
+struct PipelineProgramKeyHash
+{
+  std::size_t operator()(const PipelineProgramKey& key) const;
+};
+
+struct PipelineProgram
+{
+  PipelineProgramKey key;
+  SHADER shader;
+  std::atomic_size_t reference_count{1};
+  bool binary_retrieved = false;
+};
 
 class ProgramShaderCache
 {
 public:
-
-  static GLuint GetCurrentProgram();
-  static SHADER* SetShader(PIXEL_SHADER_RENDER_MODE render_mode, u32 components, PrimitiveType primitive_type, const GLVertexFormat* vertex_format);
-  static SHADER* SetUberShader(PrimitiveType primitive_type, u32 components, const GLVertexFormat* vertex_format);
   static void BindVertexFormat(const GLVertexFormat* vertex_format);
+  static bool IsValidVertexFormatBound();
   static void InvalidateVertexFormat();
-  static void BindLastVertexFormat();
-  static std::future<bool> CompileShader(const SHADERUID& uid, SHADER& shader);
-  static SHADER* CompileUberShader(const UBERSHADERUID& uid);
-  static void GetShaderId(SHADERUID *uid, PIXEL_SHADER_RENDER_MODE render_mode, u32 components, PrimitiveType primitive_type);
+  static void InvalidateVertexFormatIfBound(GLuint vao);
+  static void InvalidateLastProgram();
 
-  static std::future<bool> CompileShader(SHADER &shader, const char* vcode, const char* pcode, const char* gcode = nullptr);
-  static bool CompileComputeShader(SHADER& shader, const std::string& code);
-  static GLuint CompileSingleShader(GLuint type, const char *code);
+  static bool CompileComputeShader(SHADER& shader, std::string_view code);
+  static GLuint CompileSingleShader(GLenum type, std::string_view code);
+  static bool CheckShaderCompileResult(GLuint id, GLenum type, std::string_view code);
+  static bool CheckProgramLinkResult(GLuint id, std::string_view vcode, std::string_view pcode,
+                                     std::string_view gcode);
+  static StreamBuffer* GetUniformBuffer();
+  static u32 GetUniformBufferAlignment();
   static void UploadConstants();
+  static void UploadConstants(const void* data, u32 data_size);
 
   static void Init();
-  static void Shutdown(bool shadersonly = false);
+  static void Shutdown();
   static void CreateHeader();
-  static void Reload();
-  static u32 GetUniformBufferAlignment();
+
+  // This counter increments with each shader object allocated, in order to give it a unique ID.
+  // Since the shaders can be destroyed after a pipeline is created, we can't use the shader pointer
+  // as a key for GL programs. For the same reason, we can't use the GL objects either. This ID is
+  // guaranteed to be unique for the emulation session, even if the memory allocator or GL driver
+  // re-uses pointers, therefore we won't have any collisions where the shaders attached to a
+  // pipeline do not match the pipeline configuration.
+  static u64 GenerateShaderID();
+
+  static PipelineProgram* GetPipelineProgram(const GLVertexFormat* vertex_format,
+                                             const OGLShader* vertex_shader,
+                                             const OGLShader* geometry_shader,
+                                             const OGLShader* pixel_shader, const void* cache_data,
+                                             size_t cache_data_size);
+  static void ReleasePipelineProgram(PipelineProgram* prog);
 
 private:
-  static bool ShouldPrecompileUberShaders();
-  static bool UsingExclusiveUberShaders();
-  static bool UsingHybridUberShaders();
-  struct PCacheEntry
-  {
-    SHADER shader;
-    bool in_cache;
-    bool compile_started = false;
+  using PipelineProgramMap =
+      std::unordered_map<PipelineProgramKey, std::unique_ptr<PipelineProgram>,
+                         PipelineProgramKeyHash>;
 
-    void Destroy()
-    {
-      shader.Destroy();
-    }
-  };
+  static void CreateAttributelessVAO();
 
-  struct QueueEntry
-  {
-    QueueEntry() : kill_thread(true)
-    {}
-    QueueEntry(SHADER* s, const std::string& c) : shader(s), ccode(c), compute_shader(true)
-    {}
-    QueueEntry(SHADER* s, const char* v, const char* p, const char* g)
-        : shader(s), vcode(v), pcode(p)
-    {
-      gcode = g == nullptr ? std::string() : std::string(g);
-    }
-    std::promise<bool> promise;
-    SHADER* shader;
-    std::string vcode;
-    std::string pcode;
-    std::string gcode;
-    std::string ccode;
-    bool compute_shader = false;
-    bool kill_thread = false;
-  };
-
-  typedef ObjectUsageProfiler<SHADERUID, pKey_t, PCacheEntry, SHADERUID::ShaderUidHasher> PCache;
-  typedef std::unordered_map<UBERSHADERUID, PCacheEntry, UBERSHADERUID::ShaderUidHasher> UberPCache;
-
-  static void LoadFromDisk();
-  static void CompileShaders();
-  static bool CompileShaderWorker(
-      SHADER& shader, const char* vcode, const char* pcode, const char* gcode);
-  static bool CompileComputeShaderWorker(SHADER& shader, const std::string& code);
-  static void CompileThreadWorker(std::unique_ptr<cInterfaceBase> shared_context);
-  static void CompileUberShaders();
-
-  class ProgramShaderCacheInserter : public LinearDiskCacheReader<SHADERUID, u8>
-  {
-  public:
-    void Read(const SHADERUID &key, const u8 *value, u32 value_size) override;
-  };
-
-  class ProgramUberShaderCacheInserter : public LinearDiskCacheReader<UBERSHADERUID, u8>
-  {
-  public:
-    void Read(const UBERSHADERUID &key, const u8 *value, u32 value_size) override;
-  };
-
-  static PCache* pshaders;
-  static UberPCache pushaders;
-  static std::array<PCacheEntry*, PIXEL_SHADER_RENDER_MODE::PSRM_DEPTH_ONLY + 1> last_entry;
-  static std::array<SHADERUID, PIXEL_SHADER_RENDER_MODE::PSRM_DEPTH_ONLY + 1>  last_uid;
-
-  static PCacheEntry* last_uber_entry;
-  static UBERSHADERUID last_uber_uid;
+  static PipelineProgramMap s_pipeline_programs;
+  static std::mutex s_pipeline_program_lock;
 
   static u32 s_ubo_buffer_size;
-  static u32 s_p_ubo_buffer_size;
-  static u32 s_v_ubo_buffer_size;
-  static u32 s_g_ubo_buffer_size;
   static s32 s_ubo_align;
-  static u32 s_last_VAO;
 
-  static std::condition_variable s_condition_var;
-  static std::mutex s_mutex;
-  static std::queue<std::unique_ptr<QueueEntry>> s_compilation_queue;
-  static std::thread s_thread;
+  static GLuint s_attributeless_VBO;
+  static GLuint s_attributeless_VAO;
+  static GLuint s_last_VAO;
+};
+
+class SharedContextAsyncShaderCompiler : public VideoCommon::AsyncShaderCompiler
+{
+protected:
+  bool WorkerThreadInitMainThread(void** param) override;
+  bool WorkerThreadInitWorkerThread(void* param) override;
+  void WorkerThreadExit(void* param) override;
 };
 
 }  // namespace OGL

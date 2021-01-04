@@ -31,16 +31,16 @@ public:
   void Clear();
   void BindNearestSampler(int stage);
   void BindLinearSampler(int stage);
-  void BindExternalSampler(u32 stage, GLuint sampleid);
+
 private:
   static void SetParameters(GLuint sampler_id, const SamplerState& params);
 
   std::map<SamplerState, GLuint> m_cache;
-  std::array<std::pair<SamplerState, GLuint>, 9> m_active_samplers{};
+  std::array<std::pair<SamplerState, GLuint>, 8> m_active_samplers{};
 
   GLuint m_point_sampler;
   GLuint m_linear_sampler;
 };
 
 extern std::unique_ptr<SamplerCache> g_sampler_cache;
-}
+}  // namespace OGL

@@ -19,9 +19,7 @@ class PerfQuery : public PerfQueryBase
 {
 public:
   PerfQuery();
-  ~PerfQuery()
-  {}
-
+  ~PerfQuery() {}
   void EnableQuery(PerfQueryGroup type) override;
   void DisableQuery(PerfQueryGroup type) override;
   void ResetQuery() override;
@@ -60,7 +58,6 @@ public:
   void FlushResults() override;
 
 private:
-
   void WeakFlush();
   // Only use when non-empty
   void FlushOne();
@@ -79,11 +76,9 @@ public:
   void FlushResults() override;
 
 private:
-
   void WeakFlush();
   // Only use when non-empty
   void FlushOne();
 };
 
-
-} // namespace
+}  // namespace OGL

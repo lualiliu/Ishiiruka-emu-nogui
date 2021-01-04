@@ -2,23 +2,22 @@
 // Licensed under GPLv2+
 // Refer to the license.txt file included.
 
+#include "VideoBackends/OGL/VertexManager.h"
+
 #include <fstream>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "Common/Align.h"
 #include "Common/CommonTypes.h"
-#include "Common/FileUtil.h"
 #include "Common/GL/GLExtensions/GLExtensions.h"
-#include "Common/StringUtil.h"
 
-#include "VideoBackends/OGL/BoundingBox.h"
+#include "VideoBackends/OGL/OGLPipeline.h"
 #include "VideoBackends/OGL/ProgramShaderCache.h"
 #include "VideoBackends/OGL/Render.h"
 #include "VideoBackends/OGL/StreamBuffer.h"
-#include "VideoBackends/OGL/VertexManager.h"
 
-#include "VideoCommon/BPMemory.h"
 #include "VideoCommon/IndexGenerator.h"
 #include "VideoCommon/Statistics.h"
 #include "VideoCommon/VertexLoaderManager.h"
@@ -26,178 +25,168 @@
 
 namespace OGL
 {
-// This are the initially requested size for the buffers expressed in bytes
-const u32 MAX_IBUFFER_SIZE = 2 * 1024 * 1024;
-const u32 MAX_VBUFFER_SIZE = 32 * 1024 * 1024;
-
-
-VertexManager::VertexManager() : m_cpu_v_buffer(MAXVBUFFERSIZE), m_cpu_i_buffer(MAXIBUFFERSIZE)
+static void CheckBufferBinding()
 {
-  CreateDeviceObjects();
+  // The index buffer is part of the VAO state, therefore we need to bind it first.
+  if (!ProgramShaderCache::IsValidVertexFormatBound())
+  {
+    ProgramShaderCache::BindVertexFormat(
+        static_cast<GLVertexFormat*>(VertexLoaderManager::GetCurrentVertexFormat()));
+  }
 }
+
+VertexManager::VertexManager() = default;
 
 VertexManager::~VertexManager()
 {
-  DestroyDeviceObjects();
+  if (g_ActiveConfig.backend_info.bSupportsPaletteConversion)
+  {
+    glDeleteTextures(static_cast<GLsizei>(m_texel_buffer_views.size()),
+                     m_texel_buffer_views.data());
+  }
+
+  // VAO must be found when destroying the index buffer.
+  CheckBufferBinding();
+  m_texel_buffer.reset();
+  m_index_buffer.reset();
+  m_vertex_buffer.reset();
 }
 
-void VertexManager::CreateDeviceObjects()
+bool VertexManager::Initialize()
 {
-  m_vertexBuffer = StreamBuffer::Create(GL_ARRAY_BUFFER, MAX_VBUFFER_SIZE);
-  m_vertex_buffers = m_vertexBuffer->m_buffer;
+  if (!VertexManagerBase::Initialize())
+    return false;
 
-  m_indexBuffer = StreamBuffer::Create(GL_ELEMENT_ARRAY_BUFFER, MAX_IBUFFER_SIZE);
-  m_index_buffers = m_indexBuffer->m_buffer;
+  m_vertex_buffer = StreamBuffer::Create(GL_ARRAY_BUFFER, VERTEX_STREAM_BUFFER_SIZE);
+  m_index_buffer = StreamBuffer::Create(GL_ELEMENT_ARRAY_BUFFER, INDEX_STREAM_BUFFER_SIZE);
+
+  if (g_ActiveConfig.backend_info.bSupportsPaletteConversion)
+  {
+    // The minimum MAX_TEXTURE_BUFFER_SIZE that the spec mandates is 65KB, we are asking for a 1MB
+    // buffer here. This buffer is also used as storage for undecoded textures when compute shader
+    // texture decoding is enabled, in which case the requested size is 32MB.
+    GLint max_buffer_size;
+    glGetIntegerv(GL_MAX_TEXTURE_BUFFER_SIZE, &max_buffer_size);
+    m_texel_buffer = StreamBuffer::Create(
+        GL_TEXTURE_BUFFER, std::min(max_buffer_size, static_cast<GLint>(TEXEL_STREAM_BUFFER_SIZE)));
+
+    // Allocate texture views backed by buffer.
+    static constexpr std::array<std::pair<TexelBufferFormat, GLenum>, NUM_TEXEL_BUFFER_FORMATS>
+        format_mapping = {{
+            {TEXEL_BUFFER_FORMAT_R8_UINT, GL_R8UI},
+            {TEXEL_BUFFER_FORMAT_R16_UINT, GL_R16UI},
+            {TEXEL_BUFFER_FORMAT_RGBA8_UINT, GL_RGBA8UI},
+            {TEXEL_BUFFER_FORMAT_R32G32_UINT, GL_RG32UI},
+        }};
+    glGenTextures(static_cast<GLsizei>(m_texel_buffer_views.size()), m_texel_buffer_views.data());
+    glActiveTexture(GL_MUTABLE_TEXTURE_INDEX);
+    for (const auto& it : format_mapping)
+    {
+      glBindTexture(GL_TEXTURE_BUFFER, m_texel_buffer_views[it.first]);
+      glTexBuffer(GL_TEXTURE_BUFFER, it.second, m_texel_buffer->GetGLBufferId());
+    }
+  }
+
+  return true;
 }
 
-void VertexManager::DestroyDeviceObjects()
+void VertexManager::UploadUtilityUniforms(const void* uniforms, u32 uniforms_size)
 {
-  m_vertexBuffer.reset();
-  m_indexBuffer.reset();
+  InvalidateConstants();
+  ProgramShaderCache::UploadConstants(uniforms, uniforms_size);
+}
+
+bool VertexManager::UploadTexelBuffer(const void* data, u32 data_size, TexelBufferFormat format,
+                                      u32* out_offset)
+{
+  if (data_size > m_texel_buffer->GetSize())
+    return false;
+
+  const u32 elem_size = GetTexelBufferElementSize(format);
+  const auto dst = m_texel_buffer->Map(data_size, elem_size);
+  std::memcpy(dst.first, data, data_size);
+  ADDSTAT(g_stats.this_frame.bytes_uniform_streamed, data_size);
+  *out_offset = dst.second / elem_size;
+  m_texel_buffer->Unmap(data_size);
+
+  // Bind the correct view to the texel buffer slot.
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_BUFFER, m_texel_buffer_views[static_cast<u32>(format)]);
+  Renderer::GetInstance()->InvalidateTextureBinding(0);
+  return true;
+}
+
+bool VertexManager::UploadTexelBuffer(const void* data, u32 data_size, TexelBufferFormat format,
+                                      u32* out_offset, const void* palette_data, u32 palette_size,
+                                      TexelBufferFormat palette_format, u32* out_palette_offset)
+{
+  const u32 elem_size = GetTexelBufferElementSize(format);
+  const u32 palette_elem_size = GetTexelBufferElementSize(palette_format);
+  const u32 reserve_size = data_size + palette_size + palette_elem_size;
+  if (reserve_size > m_texel_buffer->GetSize())
+    return false;
+
+  const auto dst = m_texel_buffer->Map(reserve_size, elem_size);
+  const u32 palette_byte_offset = Common::AlignUp(data_size, palette_elem_size);
+  std::memcpy(dst.first, data, data_size);
+  std::memcpy(dst.first + palette_byte_offset, palette_data, palette_size);
+  ADDSTAT(g_stats.this_frame.bytes_uniform_streamed, palette_byte_offset + palette_size);
+  *out_offset = dst.second / elem_size;
+  *out_palette_offset = (dst.second + palette_byte_offset) / palette_elem_size;
+  m_texel_buffer->Unmap(palette_byte_offset + palette_size);
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_BUFFER, m_texel_buffer_views[static_cast<u32>(format)]);
+  Renderer::GetInstance()->InvalidateTextureBinding(0);
+
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_BUFFER, m_texel_buffer_views[static_cast<u32>(palette_format)]);
+  Renderer::GetInstance()->InvalidateTextureBinding(1);
+
+  return true;
 }
 
 GLuint VertexManager::GetVertexBufferHandle() const
 {
-  return m_vertex_buffers;
+  return m_vertex_buffer->m_buffer;
 }
 
 GLuint VertexManager::GetIndexBufferHandle() const
 {
-  return m_index_buffers;
+  return m_index_buffer->m_buffer;
 }
 
-void VertexManager::PrepareDrawBuffers(u32 stride)
+void VertexManager::ResetBuffer(u32 vertex_stride)
 {
-  u32 vertex_data_size = IndexGenerator::GetNumVerts() * stride;
-  u32 index_data_size = IndexGenerator::GetIndexLen() * sizeof(u16);
-  m_baseVertex = m_vertexBuffer->Stream(vertex_data_size, stride, m_cpu_v_buffer.data()) / stride;
-  m_index_offset = m_indexBuffer->Stream(index_data_size, m_cpu_i_buffer.data());
-  ADDSTAT(stats.thisFrame.bytesVertexStreamed, vertex_data_size);
-  ADDSTAT(stats.thisFrame.bytesIndexStreamed, index_data_size);
+  CheckBufferBinding();
+
+  auto buffer = m_vertex_buffer->Map(MAXVBUFFERSIZE, vertex_stride);
+  m_cur_buffer_pointer = m_base_buffer_pointer = buffer.first;
+  m_end_buffer_pointer = buffer.first + MAXVBUFFERSIZE;
+
+  buffer = m_index_buffer->Map(MAXIBUFFERSIZE * sizeof(u16));
+  m_index_generator.Start(reinterpret_cast<u16*>(buffer.first));
 }
 
-void VertexManager::ResetBuffer(u32 stride)
+void VertexManager::CommitBuffer(u32 num_vertices, u32 vertex_stride, u32 num_indices,
+                                 u32* out_base_vertex, u32* out_base_index)
 {
-  m_pCurBufferPointer = m_pBaseBufferPointer = m_cpu_v_buffer.data();
-  m_pEndBufferPointer = m_pBaseBufferPointer + m_cpu_v_buffer.size();
-  m_index_buffer_base = m_cpu_i_buffer.data();
-  IndexGenerator::Start(m_cpu_i_buffer.data());
+  u32 vertex_data_size = num_vertices * vertex_stride;
+  u32 index_data_size = num_indices * sizeof(u16);
+
+  *out_base_vertex = vertex_stride > 0 ? (m_vertex_buffer->GetCurrentOffset() / vertex_stride) : 0;
+  *out_base_index = m_index_buffer->GetCurrentOffset() / sizeof(u16);
+
+  CheckBufferBinding();
+  m_vertex_buffer->Unmap(vertex_data_size);
+  m_index_buffer->Unmap(index_data_size);
+
+  ADDSTAT(g_stats.this_frame.bytes_vertex_streamed, vertex_data_size);
+  ADDSTAT(g_stats.this_frame.bytes_index_streamed, index_data_size);
 }
 
-void VertexManager::Draw(u32 stride)
+void VertexManager::UploadUniforms()
 {
-  u32 index_size = IndexGenerator::GetIndexLen();
-  u32 max_index = IndexGenerator::GetNumVerts();
-  GLenum primitive_mode = 0;
-  static const GLenum modes[3] = {
-      GL_POINTS,
-      GL_LINES,
-      GL_TRIANGLES
-  };
-  primitive_mode = modes[static_cast<u32>(m_current_primitive_type)];
-  if (g_ogl_config.bSupportsGLBaseVertex)
-  {
-    glDrawRangeElementsBaseVertex(primitive_mode, 0, max_index, index_size, GL_UNSIGNED_SHORT, (u8*)nullptr + m_index_offset, (GLint)m_baseVertex);
-  }
-  else
-  {
-    glDrawRangeElements(primitive_mode, 0, max_index, index_size, GL_UNSIGNED_SHORT, (u8*)nullptr + m_index_offset);
-  }
-
-  INCSTAT(stats.thisFrame.numDrawCalls);
+  ProgramShaderCache::UploadConstants();
 }
-
-void VertexManager::PrepareShaders(PrimitiveType primitive, u32 components, const XFMemory &xfr, const BPMemory &bpm)
-{
-  const bool useDstAlpha = bpm.dstalpha.enable && bpm.blendmode.alphaupdate &&
-    bpm.zcontrol.pixel_format == PEControl::RGBA6_Z24;
-  // Makes sure we can actually do Dual source blending
-  bool dualSourcePossible = g_ActiveConfig.backend_info.bSupportsDualSourceBlend;
-  // If host supports GL_ARB_blend_func_extended, we can do dst alpha in
-  // the same pass as regular rendering.
-  GLVertexFormat* nativeVertexFmt = (GLVertexFormat*)VertexLoaderManager::GetCurrentVertexFormat();
-  if (useDstAlpha && dualSourcePossible)
-  {
-    ProgramShaderCache::SetShader(PSRM_DUAL_SOURCE_BLEND, VertexLoaderManager::g_current_components, m_current_primitive_type, nativeVertexFmt);
-  }
-  else
-  {
-    if (useDstAlpha)
-    {
-      ProgramShaderCache::SetShader(PSRM_ALPHA_PASS, VertexLoaderManager::g_current_components, m_current_primitive_type, nativeVertexFmt);
-    }
-    ProgramShaderCache::SetShader(PSRM_DEFAULT, VertexLoaderManager::g_current_components, m_current_primitive_type, nativeVertexFmt);
-  }
-}
-
-u16* VertexManager::GetIndexBuffer()
-{
-  return m_index_buffer_base;
-}
-void VertexManager::vFlush(bool useDstAlpha)
-{
-  GLVertexFormat* nativeVertexFmt = (GLVertexFormat*)VertexLoaderManager::GetCurrentVertexFormat();
-  nativeVertexFmt->SetFormat();
-  u32 stride = nativeVertexFmt->GetVertexStride();
-  BBox::Update();
-  // Makes sure we can actually do Dual source blending
-  bool dualSourcePossible = g_ActiveConfig.backend_info.bSupportsDualSourceBlend;
-
-  // upload global constants
-  ProgramShaderCache::UploadConstants();  
-  // If host supports GL_ARB_blend_func_extended, we can do dst alpha in
-  // the same pass as regular rendering.
-  OGL::SHADER* active_shader = nullptr;
-  if (useDstAlpha && dualSourcePossible)
-  {
-    active_shader = ProgramShaderCache::SetShader(PSRM_DUAL_SOURCE_BLEND, VertexLoaderManager::g_current_components, m_current_primitive_type, nativeVertexFmt);
-  }
-  else
-  {
-    active_shader = ProgramShaderCache::SetShader(PSRM_DEFAULT, VertexLoaderManager::g_current_components, m_current_primitive_type, nativeVertexFmt);
-  }
-  if (!active_shader)
-  {
-    g_Config.iSaveTargetId++;
-    ClearEFBCache();
-    return;
-  }
-  PrepareDrawBuffers(stride);
-  active_shader->Bind();
-  g_renderer->ApplyState(false);
-  Draw(stride);
-  // If the GPU does not support dual-source blending, we can approximate the effect by drawing
-  // the object a second time, with the write mask set to alpha only using a shader that outputs
-  // the destination/constant alpha value (which would normally be SRC_COLOR.a).
-  //
-  // This is also used when logic ops and destination alpha is enabled, since we can't enable
-  // blending and logic ops concurrently.
-  const bool logic_op_enabled = bpmem.blendmode.logicopenable.Value() && bpmem.blendmode.logicmode.Value() != BlendMode::LogicOp::COPY && !bpmem.blendmode.blendenable;
-  // run through vertex groups again to set alpha
-  if (useDstAlpha && (!dualSourcePossible || logic_op_enabled))
-  {
-    active_shader = ProgramShaderCache::SetShader(PSRM_ALPHA_PASS, VertexLoaderManager::g_current_components, m_current_primitive_type, nativeVertexFmt);
-    if (!active_shader)
-    {
-      g_Config.iSaveTargetId++;
-      ClearEFBCache();
-      return;
-    }
-
-    // only update alpha
-    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
-
-    glDisable(GL_BLEND);
-    if (logic_op_enabled)
-      glDisable(GL_COLOR_LOGIC_OP);
-
-    active_shader->Bind();
-    Draw(stride);
-    g_renderer->ResetAPIState();
-  }
-  g_Config.iSaveTargetId++;
-
-  ClearEFBCache();
-}
-
-}  // namespace
+}  // namespace OGL

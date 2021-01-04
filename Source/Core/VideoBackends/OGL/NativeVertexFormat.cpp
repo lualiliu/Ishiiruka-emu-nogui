@@ -1,17 +1,15 @@
-// Copyright 2013 Dolphin Emulator Project
+// Copyright 2008 Dolphin Emulator Project
 // Licensed under GPLv2+
 // Refer to the license.txt file included.
 
-#include "Common/Common.h"
-#include "Common/MemoryUtil.h"
-#include "Common/x64ABI.h"
-#include "Common/x64Emitter.h"
-
+#include "Common/CommonTypes.h"
 #include "Common/GL/GLUtil.h"
+#include "Common/MsgHandler.h"
+
 #include "VideoBackends/OGL/ProgramShaderCache.h"
+#include "VideoBackends/OGL/Render.h"
 #include "VideoBackends/OGL/VertexManager.h"
 
-#include "VideoCommon/CPMemory.h"
 #include "VideoCommon/NativeVertexFormat.h"
 #include "VideoCommon/VertexShaderGen.h"
 
@@ -21,17 +19,12 @@
 namespace OGL
 {
 std::unique_ptr<NativeVertexFormat>
-VertexManager::CreateNativeVertexFormat(const PortableVertexDeclaration& _vtx_decl)
+Renderer::CreateNativeVertexFormat(const PortableVertexDeclaration& vtx_decl)
 {
-  return std::make_unique<GLVertexFormat>(_vtx_decl);
+  return std::make_unique<GLVertexFormat>(vtx_decl);
 }
 
-GLVertexFormat::~GLVertexFormat()
-{
-  glDeleteVertexArrays(1, &VAO);
-}
-
-static inline GLuint VarToGL(EVTXComponentFormat t)
+static inline GLuint VarToGL(VarType t)
 {
   static const GLuint lookup[5] = {GL_UNSIGNED_BYTE, GL_BYTE, GL_UNSIGNED_SHORT, GL_SHORT,
                                    GL_FLOAT};
@@ -44,27 +37,23 @@ static void SetPointer(u32 attrib, u32 stride, const AttributeFormat& format)
     return;
 
   glEnableVertexAttribArray(attrib);
-  glVertexAttribPointer(attrib, format.components, VarToGL(format.type), true, stride,
-                        (u8*)nullptr + format.offset);
+  if (format.integer)
+    glVertexAttribIPointer(attrib, format.components, VarToGL(format.type), stride,
+                           (u8*)nullptr + format.offset);
+  else
+    glVertexAttribPointer(attrib, format.components, VarToGL(format.type), true, stride,
+                          (u8*)nullptr + format.offset);
 }
 
-GLVertexFormat::GLVertexFormat(const PortableVertexDeclaration& _vtx_decl)
+GLVertexFormat::GLVertexFormat(const PortableVertexDeclaration& vtx_decl)
+    : NativeVertexFormat(vtx_decl)
 {
-  vtx_decl = _vtx_decl;
+  u32 vertex_stride = vtx_decl.stride;
 
   // We will not allow vertex components causing uneven strides.
-  if (vtx_decl.stride & 3)
-    PanicAlert("Uneven vertex stride: %i", vtx_decl.stride);
-  
-}
+  if (vertex_stride & 3)
+    PanicAlert("Uneven vertex stride: %i", vertex_stride);
 
-void GLVertexFormat::SetFormat()
-{
-  if (initialized)
-  {
-    return;
-  }
-  initialized = true;
   VertexManager* const vm = static_cast<VertexManager*>(g_vertex_manager.get());
 
   glGenVertexArrays(1, &VAO);
@@ -75,24 +64,23 @@ void GLVertexFormat::SetFormat()
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vm->GetIndexBufferHandle());
   glBindBuffer(GL_ARRAY_BUFFER, vm->GetVertexBufferHandle());
 
-  SetPointer(SHADER_POSITION_ATTRIB, vtx_decl.stride, vtx_decl.position);
+  SetPointer(SHADER_POSITION_ATTRIB, vertex_stride, vtx_decl.position);
 
   for (int i = 0; i < 3; i++)
-    SetPointer(SHADER_NORM0_ATTRIB + i, vtx_decl.stride, vtx_decl.normals[i]);
+    SetPointer(SHADER_NORM0_ATTRIB + i, vertex_stride, vtx_decl.normals[i]);
 
   for (int i = 0; i < 2; i++)
-    SetPointer(SHADER_COLOR0_ATTRIB + i, vtx_decl.stride, vtx_decl.colors[i]);
+    SetPointer(SHADER_COLOR0_ATTRIB + i, vertex_stride, vtx_decl.colors[i]);
 
   for (int i = 0; i < 8; i++)
-    SetPointer(SHADER_TEXTURE0_ATTRIB + i, vtx_decl.stride, vtx_decl.texcoords[i]);
+    SetPointer(SHADER_TEXTURE0_ATTRIB + i, vertex_stride, vtx_decl.texcoords[i]);
 
-  
-  if (vtx_decl.posmtx.enable)
-  {
-    glEnableVertexAttribArray(SHADER_POSMTX_ATTRIB);
-    glVertexAttribIPointer(SHADER_POSMTX_ATTRIB, 4, GL_UNSIGNED_BYTE, vtx_decl.stride,
-                           (u8*)NULL + vtx_decl.posmtx.offset);
-  }
+  SetPointer(SHADER_POSMTX_ATTRIB, vertex_stride, vtx_decl.posmtx);
 }
 
+GLVertexFormat::~GLVertexFormat()
+{
+  ProgramShaderCache::InvalidateVertexFormatIfBound(VAO);
+  glDeleteVertexArrays(1, &VAO);
+}
 }  // namespace OGL
