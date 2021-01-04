@@ -121,9 +121,15 @@ if(USE_EGL AND EGL_FOUND)
     )
   endif()
   if(ANDROID)
-    target_sources(common PRIVATE GL/GLInterface/EGLAndroid.cpp)
-  elseif(USE_X11)
-    target_sources(common PRIVATE GL/GLInterface/EGLX11.cpp)
+    target_sources(common PRIVATE
+      GL/GLInterface/EGLAndroid.cpp
+      GL/GLInterface/EGLAndroid.h
+    )
+  elseif(ENABLE_X11 AND X11_FOUND)
+    target_sources(common PRIVATE
+      GL/GLInterface/EGLX11.cpp
+      GL/GLInterface/EGLX11.h
+    )
   endif()
   if (LIBDRM_FOUND AND LIBGBM_FOUND)
     target_include_directories(common PRIVATE ${EGL_INCLUDE_DIRS} ${LIBDRM_INCLUDE_DIRS} ${LIBGBM_INCLUDE_DIRS})
@@ -132,7 +138,6 @@ if(USE_EGL AND EGL_FOUND)
     target_include_directories(common PRIVATE ${EGL_INCLUDE_DIRS})
     target_link_libraries(common PUBLIC ${EGL_LIBRARIES})
   endif()
-  #target_link_libraries(common PUBLIC EGL)
 endif()
 
 if(WIN32)

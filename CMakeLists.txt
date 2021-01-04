@@ -10,7 +10,7 @@ set(CMAKE_OSX_ARCHITECTURES "x86_64")
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.9" CACHE string "")
 
 project(ishiiruka)
-option(USE_EGL "Enables EGL OpenGL Interface" OFF)
+option(USE_EGL "Enables EGL OpenGL Interface" ON)
 option(TRY_X11 "Enables X11 Support" OFF)
 option(ENABLE_NOGUI "Enable NoGUI frontend" ON)
 option(USE_SHARED_ENET "Use shared libenet if found rather than Dolphin's soon-to-compatibly-diverge version" OFF)
