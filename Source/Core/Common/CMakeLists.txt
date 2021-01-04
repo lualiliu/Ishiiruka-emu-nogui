@@ -106,60 +106,14 @@ target_sources(common PRIVATE
   GL/GLExtensions/GLExtensions.h
 )
 
-if(USE_EGL AND EGL_FOUND)
-  if (LIBDRM_FOUND AND LIBGBM_FOUND)
-    target_sources(common PRIVATE
+target_sources(common PRIVATE
       GL/GLInterface/EGL.cpp
       GL/GLInterface/EGL.h
       GL/GLInterface/EGLDRM.cpp
       GL/GLInterface/EGLDRM.h
-    )
-  else()
-    target_sources(common PRIVATE
-      GL/GLInterface/EGL.cpp
-      GL/GLInterface/EGL.h
-    )
-  endif()
-  if(ANDROID)
-    target_sources(common PRIVATE
-      GL/GLInterface/EGLAndroid.cpp
-      GL/GLInterface/EGLAndroid.h
-    )
-  elseif(ENABLE_X11 AND X11_FOUND)
-    target_sources(common PRIVATE
-      GL/GLInterface/EGLX11.cpp
-      GL/GLInterface/EGLX11.h
-    )
-  endif()
-  if (LIBDRM_FOUND AND LIBGBM_FOUND)
-    target_include_directories(common PRIVATE ${EGL_INCLUDE_DIRS} ${LIBDRM_INCLUDE_DIRS} ${LIBGBM_INCLUDE_DIRS})
-    target_link_libraries(common PUBLIC ${EGL_LIBRARIES} ${LIBDRM_LIBRARIES} ${LIBGBM_LIBRARIES})
-  else()
-    target_include_directories(common PRIVATE ${EGL_INCLUDE_DIRS})
-    target_link_libraries(common PUBLIC ${EGL_LIBRARIES})
-  endif()
-endif()
-
-if(WIN32)
-  target_sources(common PRIVATE
-    CompatPatches.cpp
-    GL/GLInterface/WGL.cpp
-  )
-elseif(APPLE)
-  target_sources(common PRIVATE GL/GLInterface/AGL.mm)
-elseif(HAIKU)
-  target_sources(common PRIVATE GL/GLInterface/BGL.cpp)
-  target_link_libraries(common PUBLIC be GL)
-elseif(USE_X11)
-  if (NOT USE_EGL)
-    target_sources(common PRIVATE GL/GLInterface/GLX.cpp)
-    # GLX has a hard dependency on libGL.
-    # Make sure to link to it if using GLX.
-    target_link_libraries(common PUBLIC ${OPENGL_LIBRARIES})
-  endif()
-  target_sources(common PRIVATE GL/GLInterface/X11_Util.cpp)
-  target_link_libraries(common PUBLIC ${XRANDR_LIBRARIES})
-endif()
+)
+target_include_directories(common PRIVATE ${EGL_INCLUDE_DIRS} ${LIBDRM_INCLUDE_DIRS} ${LIBGBM_INCLUDE_DIRS})
+target_link_libraries(common PUBLIC ${EGL_LIBRARIES} ${LIBDRM_LIBRARIES} ${LIBGBM_LIBRARIES})
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   target_link_libraries(common PUBLIC dl rt)
