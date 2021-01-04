@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "Common/GL/GLInterfaceBase.h"
 #include "Core/Host.h"
 
 void Host_NotifyMapLoaded()
@@ -62,8 +61,4 @@ void Host_ShowVideoConfig(void*, const std::string&)
 }
 void Host_YieldToUI()
 {
-}
-std::unique_ptr<cInterfaceBase> HostGL_CreateGLInterface()
-{
-  return nullptr;
 }
