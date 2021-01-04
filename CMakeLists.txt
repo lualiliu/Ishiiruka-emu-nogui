@@ -21,7 +21,7 @@ option(ENABLE_LTO "Enables Link Time Optimization" OFF)
 option(ENABLE_GENERIC "Enables generic build that should run on any little-endian host" OFF)
 option(ENABLE_HEADLESS "Enables running Dolphin as a headless variant" OFF)
 option(ENABLE_ALSA "Enables ALSA sound backend" ON)
-option(ENABLE_PULSEAUDIO "Enables PulseAudio sound backend" ON)
+option(ENABLE_PULSEAUDIO "Enables PulseAudio sound backend" OFF)
 option(ENABLE_LLVM "Enables LLVM support, for disassembly" ON)
 
 # Maintainers: if you consider blanket disabling this for your users, please
