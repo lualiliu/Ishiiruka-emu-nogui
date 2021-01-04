@@ -11,10 +11,11 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.9" CACHE string "")
 
 project(ishiiruka)
 option(USE_EGL "Enables EGL OpenGL Interface" OFF)
-option(TRY_X11 "Enables X11 Support" ON)
+option(TRY_X11 "Enables X11 Support" OFF)
+option(ENABLE_NOGUI "Enable NoGUI frontend" ON)
 option(USE_SHARED_ENET "Use shared libenet if found rather than Dolphin's soon-to-compatibly-diverge version" OFF)
 option(USE_UPNP "Enables UPnP port mapping support" ON)
-option(ENABLE_WX "Enable wxWidgets (Default)" ON)
+option(ENABLE_WX "Enable wxWidgets (Default)" OFF)
 option(ENABLE_QT2 "Enable Qt2 (use the other experimental Qt interface)" OFF)
 option(ENABLE_LTO "Enables Link Time Optimization" OFF)
 option(ENABLE_GENERIC "Enables generic build that should run on any little-endian host" OFF)
@@ -442,12 +443,6 @@ if(UNIX AND NOT APPLE AND NOT ANDROID AND NOT HAIKU AND NOT ENABLE_HEADLESS)
     message(STATUS "X11 support disabled")
     add_definitions(-DHAVE_X11=0)
   endif()
-
-  if (NOT USE_X11)
-    message(FATAL_ERROR "\n"
-            "No suitable display platform found\n"
-            "Requires x11 to run")
-  endif()
 endif()
 
 if(USE_X11)
@@ -541,6 +536,16 @@ add_subdirectory(Externals/glslang)
 add_subdirectory(Externals/pugixml)
 
 add_subdirectory(Externals/cpp-optparse)
+
+#Add fmt support(DRM support)
+#find_package(fmt 7.1)
+#if(fmt_FOUND)
+  #message(STATUS "Using shared fmt ${fmt_VERSION}")
+#else()
+  #check_vendoring_approved(fmt)
+  message(STATUS "Using static fmt from Externals")
+  add_subdirectory(Externals/fmt EXCLUDE_FROM_ALL)
+#endif()
 
 if(USE_SHARED_ENET)
   check_lib(ENET libenet enet enet/enet.h QUIET)

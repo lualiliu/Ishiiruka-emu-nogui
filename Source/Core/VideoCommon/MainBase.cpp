@@ -48,7 +48,7 @@ void VideoBackendBase::ShowConfig(void* parent_handle)
   {
     InitBackendInfo();
   }
-  Host_ShowVideoConfig(parent_handle, GetDisplayName());
+  //Host_ShowVideoConfig(parent_handle, GetDisplayName());
 }
 
 void VideoBackendBase::Video_ExitLoop()

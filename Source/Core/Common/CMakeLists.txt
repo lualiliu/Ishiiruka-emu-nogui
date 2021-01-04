@@ -98,19 +98,41 @@ endif()
 
 # OpenGL Interface
 target_sources(common PRIVATE
+  GL/GLContext.cpp
+  GL/GLContext.h
   GL/GLUtil.cpp
+  GL/GLUtil.h
   GL/GLExtensions/GLExtensions.cpp
-  GL/GLInterface/GLInterface.cpp
+  GL/GLExtensions/GLExtensions.h
 )
 
-if(USE_EGL)
-  target_sources(common PRIVATE GL/GLInterface/EGL.cpp)
+if(USE_EGL AND EGL_FOUND)
+  if (LIBDRM_FOUND AND LIBGBM_FOUND)
+    target_sources(common PRIVATE
+      GL/GLInterface/EGL.cpp
+      GL/GLInterface/EGL.h
+      GL/GLInterface/EGLDRM.cpp
+      GL/GLInterface/EGLDRM.h
+    )
+  else()
+    target_sources(common PRIVATE
+      GL/GLInterface/EGL.cpp
+      GL/GLInterface/EGL.h
+    )
+  endif()
   if(ANDROID)
     target_sources(common PRIVATE GL/GLInterface/EGLAndroid.cpp)
   elseif(USE_X11)
     target_sources(common PRIVATE GL/GLInterface/EGLX11.cpp)
   endif()
-  target_link_libraries(common PUBLIC EGL)
+  if (LIBDRM_FOUND AND LIBGBM_FOUND)
+    target_include_directories(common PRIVATE ${EGL_INCLUDE_DIRS} ${LIBDRM_INCLUDE_DIRS} ${LIBGBM_INCLUDE_DIRS})
+    target_link_libraries(common PUBLIC ${EGL_LIBRARIES} ${LIBDRM_LIBRARIES} ${LIBGBM_LIBRARIES})
+  else()
+    target_include_directories(common PRIVATE ${EGL_INCLUDE_DIRS})
+    target_link_libraries(common PUBLIC ${EGL_LIBRARIES})
+  endif()
+  #target_link_libraries(common PUBLIC EGL)
 endif()
 
 if(WIN32)

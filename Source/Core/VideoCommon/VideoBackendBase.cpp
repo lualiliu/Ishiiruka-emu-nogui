@@ -13,7 +13,7 @@
 #include "VideoBackends/OGL/VideoBackend.h"
 #include "VideoBackends/Software/VideoBackend.h"
 #ifndef __APPLE__
-#include "VideoBackends/Vulkan/VideoBackend.h"
+//#include "VideoBackends/Vulkan/VideoBackend.h"
 #endif
 std::vector<std::unique_ptr<VideoBackendBase>> g_available_video_backends;
 VideoBackendBase* g_video_backend = nullptr;
@@ -46,7 +46,7 @@ void VideoBackendBase::PopulateList()
   // disable OGL video Backend while is merged from master
   g_available_video_backends.push_back(std::make_unique<OGL::VideoBackend>());
 #ifndef __APPLE__
-  g_available_video_backends.push_back(std::make_unique<Vulkan::VideoBackend>());
+  //g_available_video_backends.push_back(std::make_unique<Vulkan::VideoBackend>());
 #endif
   // Disable software video backend as is currently not working
   //g_available_video_backends.push_back(std::make_unique<SW::VideoSoftware>());

@@ -309,7 +309,7 @@ if(LIBUSB_FOUND)
 endif()
 
 if(NOT APPLE)
-  target_link_libraries(core PUBLIC videovulkan)
+  #target_link_libraries(core PUBLIC videovulkan)
 endif()
 
 if(WIN32)
