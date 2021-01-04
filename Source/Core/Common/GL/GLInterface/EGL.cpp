@@ -28,6 +28,13 @@
 #define EGL_OPENGL_ES3_BIT_KHR 0x00000040
 #endif /* EGL_KHR_create_context */
 
+//add GLContextEGL(EGLDRM support)
+GLContextEGL::~GLContextEGL()
+{
+  DestroyWindowSurface();
+  DestroyContext();
+}
+
 // Show the current FPS
 void cInterfaceEGL::Swap()
 {
